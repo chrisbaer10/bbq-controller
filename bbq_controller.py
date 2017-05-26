@@ -11,12 +11,46 @@ import RPi.GPIO as GPIO
 import plotly.plotly as py
 import plotly.tools as tls
 import plotly.graph_objs as go
-import numpy as np
 
-parser = argparse.ArgumentParser()
-parser.add_argument('-v', '--verbose', dest='verbose', action='store_true')
-parser.add_argument('-q', '--quiet', dest='quiet', action='store_true')
-args = parser.parse_args()
+args={}
+counter=0
+Motor1A = 16
+Motor1B = 18
+Motor1E = 22
+P = 5
+I = .1
+D = 10
+B = 0
+c={}
+pit_temp = 0
+meat_temp = 0
+target_temp = 0
+current_temp = 0
+count = 0
+fanSpeed = 0
+accumulatedError = 0
+sum = 0
+
+def setup_args():
+	parser = argparse.ArgumentParser()
+	parser.add_argument('-v', '--verbose', dest='verbose', action='store_true')
+	parser.add_argument('-q', '--quiet', dest='quiet', action='store_true')
+	parser.add_argument('-d', '--demo', dest='demo', action='store_true')
+	global args
+	args = parser.parse_args()
+
+def log_verbose( string ):
+	global args
+	if args.verbose:
+		print string
+	return
+
+def read_config():
+	config = ConfigParser.RawConfigParser()
+	config.read('bbq_controller.cfg')
+	con = collections.namedtuple('config', ['pit', 'meat', 'set_temp'])
+	global c
+	c = con(config.get('Sensors', 'pit_sensorid'), config.get('Sensors', 'meat_sensorid'), config.get('Configuration', 'set_temp'))
 
 def setup_stream():
 	log_verbose("Setting up Stream...")
@@ -66,27 +100,20 @@ def setup_stream():
 	s_3.open()
 	log_verbose("Done Setting up Stream\n")
 
-def read_config():
-	config = ConfigParser.RawConfigParser()
-	config.read('bbq_controller.cfg')
-	con = collections.namedtuple('config', ['pit', 'meat', 'set_temp'])
-	global c
-	c = con(config.get('Sensors', 'pit_sensorid'), config.get('Sensors', 'meat_sensorid'), config.get('Configuration', 'set_temp'))
-
 def get_temp( sensor_id ):
-	sensor = W1ThermSensor(W1ThermSensor.THERM_SENSOR_DS18B20, sensor_id)
-	return sensor.get_temperature(W1ThermSensor.DEGREES_F)
-
-def log_verbose( string ):
-	if args.verbose:
-		print string
-	return
+	if args.demo:
+		global counter
+		counter += 1
+		return counter
+	else:
+		sensor = W1ThermSensor(W1ThermSensor.THERM_SENSOR_DS18B20, sensor_id)
+		return sensor.get_temperature(W1ThermSensor.DEGREES_F)
 
 def setup_motor():
 	GPIO.setmode(GPIO.BOARD)
-	Motor1A = 16
-	Motor1B = 18
-	Motor1E = 22
+	global Motor1A
+	global Motor1B
+	global Motor1E
 
 	GPIO.setup(Motor1A,GPIO.OUT)
 	GPIO.setup(Motor1B,GPIO.OUT)
@@ -99,18 +126,47 @@ def setup_motor():
 	p = GPIO.PWM(Motor1A, 50)
 	p.start(0)
 
+def loop():
+	global P,I,D,B,pit_temp,meat_temp,current_temp,target_temp,count,fanSpeed,accumulatedError,sum,meat_temp
+	while True:
+		date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+		pit_temp = str(get_temp(c.pit))
+		meat_temp = str(get_temp(c.meat))
+		print ("Current Pit Temperature: " + pit_temp)
+		print ("Current Meat Temperature: " + meat_temp)
+		print
+		s_1.write(dict(x=date,y=pit_temp))
+		s_2.write(dict(x=date,y=meat_temp))
+		current_temp = int(get_temp(c.pit))
+		target_temp = int(c.set_temp)
+		error = (target_temp) - (current_temp)
+		log_verbose("Error: " + str(error))
+		if 0 < fanSpeed and fanSpeed < 100:
+			accumulatedError = accumulatedError + error
+			log_verbose("accumulatedError: " + str(accumulatedError))
+		sum = sum + current_temp
+		count += 1	
+		averageTemp = sum / count
+		log_verbose("Average Temp: %d" % averageTemp)
+		fanSpeed = B + ( P * error ) + ( I * accumulatedError ) + ( D * (averageTemp - current_temp)) 
+		if fanSpeed <= 0:
+			s_3.write(dict(x=date,y=0))
+			p.ChangeDutyCycle(0)
+		elif fanSpeed >= 100: 
+			s_3.write(dict(x=date,y=100))
+			p.ChangeDutyCycle(100)
+		else:
+			s_3.write(dict(x=date,y=fanSpeed))
+			p.ChangeDutyCycle(fanSpeed)
+		print "Fan Speed: %d" % fanSpeed
+		if args.demo:
+			sleep(1)
+
 def main():
+	setup_args()
 	read_config()
 	setup_stream()
 	setup_motor()
-	P = 5
-	I = .1
-	D = 10
-	B = 0
-	count = 0
-	fanSpeed = 0
-	accumulatedError = 0
-	sum = 0
 
 	print ("Pit Temperature Sensor: " + str(c.pit))
 	print ("Meat Temperature Sensor: " + str(c.meat))
@@ -118,37 +174,7 @@ def main():
 	print ("Set Temperature: " + str(c.set_temp))
 	print
 	try:
-		while True:
-			date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-			pit_temp = str(get_temp(c.pit))
-			meat_temp = str(get_temp(c.meat))
-			print ("Current Pit Temperature: " + pit_temp)
-			print ("Current Meat Temperature: " + meat_temp)
-			print
-			s_1.write(dict(x=date,y=pit_temp))
-			s_2.write(dict(x=date,y=meat_temp))
-                        current_temp = int(get_temp(c.pit))
-			target_temp = int(c.set_temp)
-                        error = (target_temp) - (current_temp)
-			log_verbose("Error: " + str(error))
-			if 0 < fanSpeed and fanSpeed < 100:
-				accumulatedError = accumulatedError + error
-				log_verbose("accumulatedError: " + str(accumulatedError))
-			sum = sum + current_temp
-			count = count + 1	
-			averageTemp = sum / count
-			log_verbose("Average Temp: %d" % averageTemp)
-			fanSpeed = B + ( P * error ) + ( I * accumulatedError ) + ( D * (averageTemp - current_temp)) 
-			if fanSpeed <= 0:
-				s_3.write(dict(x=date,y=0))
-				p.ChangeDutyCycle(0)
-			elif fanSpeed >= 100: 
-				s_3.write(dict(x=date,y=100))
-				p.ChangeDutyCycle(100)
-			else:
-				s_3.write(dict(x=date,y=fanSpeed))
-				p.ChangeDutyCycle(fanSpeed)
-			print "Fan Speed: %d" % fanSpeed
+		loop()
 	except KeyboardInterrupt:
 		print 'interrupted!'
 		p.stop()
