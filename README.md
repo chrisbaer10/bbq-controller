@@ -16,4 +16,4 @@ docker build -t bbq ~/bbq-controller --no-cache=true
 
 <b>Run Docker Image</b>
 <br>
-docker run --device /dev/ttyAMA0:/dev/ttyAMA0 --device /dev/mem:/dev/mem --privileged --env-file ~/bbq-controller/env.list -ti bbq
+docker run --device /dev/ttyAMA0:/dev/ttyAMA0 --device /dev/mem:/dev/mem --privileged --env-file ~/bbq-controller/env.list --name bbq -t bbq
