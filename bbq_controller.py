@@ -1,12 +1,8 @@
 #!/usr/bin/python
 
-import sys
+import sys, os, datetime, argparse, ConfigParser, collections
 from time import sleep
-import datetime
-import argparse
 from w1thermsensor import W1ThermSensor
-import ConfigParser
-import collections
 import RPi.GPIO as GPIO
 import plotly.plotly as py
 import plotly.tools as tls
@@ -35,7 +31,8 @@ def setup_args():
 	parser = argparse.ArgumentParser()
 	parser.add_argument('-v', '--verbose', dest='verbose', action='store_true')
 	parser.add_argument('-q', '--quiet', dest='quiet', action='store_true')
-	parser.add_argument('-d', '--demo', dest='demo', action='store_true')
+	parser.add_argument('-x', '--demo', dest='demo', action='store_true')
+	parser.add_argument('-d', '--docker', dest='docker', action='store_true')
 	global args
 	args = parser.parse_args()
 
@@ -52,7 +49,12 @@ def read_config():
 	global c
 	c = con(config.get('Sensors', 'pit_sensorid'), config.get('Sensors', 'meat_sensorid'), config.get('Configuration', 'set_temp'))
 
+def getos(name):
+	return os.getenv(name)
+
 def setup_stream():
+	if args.docker:
+		tls.set_credentials_file(username=getos('py_user'), api_key=getos('py_api'), stream_ids=[getos('py_1'),getos('py_2'),getos('py_3')])
 	log_verbose("Setting up Stream...")
 	filename='bbq_streaming'
 	title='BBQ Streaming'
@@ -60,7 +62,7 @@ def setup_stream():
 	token_1 = stream_tokens[-1]
 	log_verbose("Pit Temp Stream Token " + token_1)
 	token_2 = stream_tokens[-2]
-	log_verbose("Pit Temp Stream Token " + token_2)
+	log_verbose("Meat Temp Stream Token " + token_2)
 	token_3 = stream_tokens[-3]
 	log_verbose("Motor Stream Token " + token_3)
 	stream_id1 = dict(token=token_1, maxpoints=60)
