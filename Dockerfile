@@ -21,4 +21,4 @@ WORKDIR "bbq-controller/"
 RUN git pull
 
 #install and initialize the temp controller as you HAVE to do it with priv access which you can't do at build time with docker build. Starts BBQ smoker with a temp of 225.
-CMD sudo ./bbq_controller.py -v
+CMD sudo ./bbq_controller.py -v -x -d
