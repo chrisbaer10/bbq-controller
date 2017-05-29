@@ -45,9 +45,9 @@ def log_verbose( string ):
 def read_config():
 	config = ConfigParser.RawConfigParser()
 	config.read('bbq_controller.cfg')
-	con = collections.namedtuple('config', ['pit', 'meat', 'set_temp'])
+	con = collections.namedtuple('config', ['pit', 'meat', 'set_temp', 'alert_min_temp', 'alert_max_temp'])
 	global c
-	c = con(config.get('Sensors', 'pit_sensorid'), config.get('Sensors', 'meat_sensorid'), config.get('Configuration', 'set_temp'))
+	c = con(config.get('Sensors', 'pit_sensorid'), config.get('Sensors', 'meat_sensorid'), config.get('Configuration', 'set_temp'), config.get('Configuration', 'alert_min_temp'), config.get('Configuration', 'alert_max_temp'))
 
 def getos(name):
 	return os.getenv(name)
@@ -174,6 +174,8 @@ def main():
 	print ("Meat Temperature Sensor: " + str(c.meat))
 	log_verbose("Starting Program...")
 	print ("Set Temperature: " + str(c.set_temp))
+	print ("Alert Min Temperature: " + str(c.alert_min_temp))
+	print ("Alert Max Temperature: " + str(c.alert_max_temp))
 	print
 	try:
 		loop()
