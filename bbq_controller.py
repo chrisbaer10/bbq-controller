@@ -7,6 +7,7 @@ import RPi.GPIO as GPIO
 import plotly.plotly as py
 import plotly.tools as tls
 import plotly.graph_objs as go
+from pushover import Client
 
 args={}
 counter=0
@@ -26,7 +27,12 @@ count = 0
 fanSpeed = 0
 accumulatedError = 0
 sum = 0
+tempRangeMet = False
+fmt = '%Y-%m-%d %H:%M:%S.%f'
+alertLastSent = datetime.datetime.now()
 
+def send_push(message, title):
+	Client().send_message(message, title=title)
 def setup_args():
 	parser = argparse.ArgumentParser()
 	parser.add_argument('-v', '--verbose', dest='verbose', action='store_true')
@@ -45,9 +51,9 @@ def log_verbose( string ):
 def read_config():
 	config = ConfigParser.RawConfigParser()
 	config.read('bbq_controller.cfg')
-	con = collections.namedtuple('config', ['pit', 'meat', 'set_temp', 'alert_min_temp', 'alert_max_temp'])
+	con = collections.namedtuple('config', ['pit', 'meat', 'set_temp', 'alert_min_temp', 'alert_max_temp', 'alert_max_interval_sec'])
 	global c
-	c = con(config.get('Sensors', 'pit_sensorid'), config.get('Sensors', 'meat_sensorid'), config.get('Configuration', 'set_temp'), config.get('Configuration', 'alert_min_temp'), config.get('Configuration', 'alert_max_temp'))
+	c = con(config.get('Sensors', 'pit_sensorid'), config.get('Sensors', 'meat_sensorid'), config.get('Configuration', 'set_temp'), config.get('Configuration', 'alert_min_temp'), config.get('Configuration', 'alert_max_temp'), config.get('Configuration', 'alert_max_interval_sec'))
 
 def getos(name):
 	return os.getenv(name)
@@ -129,9 +135,10 @@ def setup_motor():
 	p.start(0)
 
 def loop():
-	global P,I,D,B,pit_temp,meat_temp,current_temp,target_temp,count,fanSpeed,accumulatedError,sum,meat_temp
+	global P,I,D,B,pit_temp,meat_temp,current_temp,target_temp,count,fanSpeed,accumulatedError,sum,meat_temp,tempRangeMet,alertLastSent
 	while True:
-		date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+		now = datetime.datetime.now()
+		date = now.strftime(fmt)
 		pit_temp = str(get_temp(c.pit))
 		meat_temp = str(get_temp(c.meat))
 		print ("Current Pit Temperature: " + pit_temp)
@@ -140,6 +147,19 @@ def loop():
 		s_1.write(dict(x=date,y=pit_temp))
 		s_2.write(dict(x=date,y=meat_temp))
 		current_temp = int(get_temp(c.pit))
+		print "Alert Last Sent : " + alertLastSent.strftime(fmt)
+		if int(current_temp) > int(c.alert_min_temp) and int(current_temp) < int(c.alert_max_temp):
+			# set alerting to true now
+			tempRangeMet = True
+		diff_sec = (now-alertLastSent).total_seconds()
+		if int(current_temp) < int(c.alert_min_temp) and tempRangeMet and int(diff_sec) > int(c.alert_max_interval_sec):
+			print "Temperature is too low... sending an alert!"
+			send_push("Temperature is too low... " + str(current_temp) + " at " + date, "BBQ - Low - " + str(current_temp))
+			alertLastSent = now
+		if int(current_temp) > int(c.alert_max_temp) and tempRangeMet and int(diff_sec) > int(c.alert_max_interval_sec): 
+			print "Temperature is too hot... sending an alert!"
+			send_push("Temperature is too HOT... " + str(current_temp) + " at " + date, "BBQ - HOT - " + str(current_temp))
+			alertLastSent = now
 		target_temp = int(c.set_temp)
 		error = (target_temp) - (current_temp)
 		log_verbose("Error: " + str(error))
