@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-import sys, os, datetime, argparse, ConfigParser, collections
+import sys, os, datetime, argparse, ConfigParser, collections, time
 from time import sleep
 from w1thermsensor import W1ThermSensor
 import RPi.GPIO as GPIO
@@ -8,6 +8,9 @@ import plotly.plotly as py
 import plotly.tools as tls
 import plotly.graph_objs as go
 from pushover import Client
+import plotly.plotly as py
+import plotly.graph_objs as go
+import pandas as pd
 
 args={}
 counter=0
@@ -30,6 +33,7 @@ sum = 0
 tempRangeMet = False
 fmt = '%Y-%m-%d %H:%M:%S.%f'
 alertLastSent = datetime.datetime.now()
+timestr = time.strftime("%Y%m%d-%H%M%S")
 
 def send_push(message, title):
 	Client().send_message(message, title=title)
@@ -58,56 +62,6 @@ def read_config():
 def getos(name):
 	return os.getenv(name)
 
-def setup_stream():
-	if args.docker:
-		tls.set_credentials_file(username=getos('py_user'), api_key=getos('py_api'), stream_ids=[getos('py_1'),getos('py_2'),getos('py_3')])
-	log_verbose("Setting up Stream...")
-	filename='bbq_streaming'
-	title='BBQ Streaming'
-	stream_tokens = tls.get_credentials_file()['stream_ids']
-	token_1 = stream_tokens[-1]
-	log_verbose("Pit Temp Stream Token " + token_1)
-	token_2 = stream_tokens[-2]
-	log_verbose("Meat Temp Stream Token " + token_2)
-	token_3 = stream_tokens[-3]
-	log_verbose("Motor Stream Token " + token_3)
-	stream_id1 = dict(token=token_1, maxpoints=60)
-	stream_id2 = dict(token=token_2, maxpoints=60)
-	stream_id3 = dict(token=token_3, maxpoints=60)
-	trace1 = go.Scatter(x=[], y=[], stream=stream_id1, name='Pit Temp')
-	trace2 = go.Scatter(x=[], y=[], stream=stream_id2, name='Meat Temp')
-	trace3 = go.Scatter(x=[], y=[], stream=stream_id3, name='Motor Percent')
-	data = [trace1, trace2, trace3]
-	layout = dict(title = title,
-		xaxis = dict(title = 'Date'),
-		yaxis = dict(title = 'Temperature (degrees F)'),
-		shapes=[{
-			'type': 'line',
-			'xref': 'paper',
-			'x0': 0,
-			'y0': c.set_temp,
-			'x1': 1,
-			'y1': c.set_temp, # ditto
-			'line': {
-				'color': 'rgb(185, 52, 52)',
-                                'width': 1,
-                                'dash': 'dash',
-			},
-		}]
-	)
-	fig = go.Figure(data=data, layout=layout)
-	plot_url = py.plot(fig, filename=filename)
-	global s_1
-	s_1 = py.Stream(stream_id=token_1)
-	global s_2
-	s_2 = py.Stream(stream_id=token_2)
-	global s_3
-	s_3 = py.Stream(stream_id=token_3)
-	s_1.open()
-	s_2.open()
-	s_3.open()
-	log_verbose("Done Setting up Stream\n")
-
 def get_temp( sensor_id ):
 	if args.demo:
 		global counter
@@ -134,62 +88,78 @@ def setup_motor():
 	p = GPIO.PWM(Motor1A, 50)
 	p.start(0)
 
-def loop():
-	global P,I,D,B,pit_temp,meat_temp,current_temp,target_temp,count,fanSpeed,accumulatedError,sum,meat_temp,tempRangeMet,alertLastSent
-	while True:
-		now = datetime.datetime.now()
-		date = now.strftime(fmt)
-		pit_temp = str(get_temp(c.pit))
-		meat_temp = str(get_temp(c.meat))
-		print ("Current Pit Temperature: " + pit_temp)
-		print ("Current Meat Temperature: " + meat_temp)
-		print
-		s_1.write(dict(x=date,y=pit_temp))
-		s_2.write(dict(x=date,y=meat_temp))
-		current_temp = int(get_temp(c.pit))
-		print "Alert Last Sent : " + alertLastSent.strftime(fmt)
-		if int(current_temp) > int(c.alert_min_temp) and int(current_temp) < int(c.alert_max_temp):
-			# set alerting to true now
-			tempRangeMet = True
-		diff_sec = (now-alertLastSent).total_seconds()
-		if int(current_temp) < int(c.alert_min_temp) and tempRangeMet and int(diff_sec) > int(c.alert_max_interval_sec):
-			print "Temperature is too low... sending an alert!"
-			send_push("Temperature is too low... " + str(current_temp) + " at " + date, "BBQ - Low - " + str(current_temp))
-			alertLastSent = now
-		if int(current_temp) > int(c.alert_max_temp) and tempRangeMet and int(diff_sec) > int(c.alert_max_interval_sec): 
-			print "Temperature is too hot... sending an alert!"
-			send_push("Temperature is too HOT... " + str(current_temp) + " at " + date, "BBQ - HOT - " + str(current_temp))
-			alertLastSent = now
-		target_temp = int(c.set_temp)
-		error = (target_temp) - (current_temp)
-		log_verbose("Error: " + str(error))
-		if 0 < fanSpeed and fanSpeed < 100:
-			accumulatedError = accumulatedError + error
-			log_verbose("accumulatedError: " + str(accumulatedError))
-		sum = sum + current_temp
-		count += 1	
-		averageTemp = sum / count
-		log_verbose("Average Temp: %d" % averageTemp)
-		fanSpeed = B + ( P * error ) + ( I * accumulatedError ) + ( D * (averageTemp - current_temp)) 
-		if fanSpeed <= 0:
-			s_3.write(dict(x=date,y=0))
-			p.ChangeDutyCycle(0)
-		elif fanSpeed >= 100: 
-			s_3.write(dict(x=date,y=100))
-			p.ChangeDutyCycle(100)
-		else:
-			s_3.write(dict(x=date,y=fanSpeed))
-			p.ChangeDutyCycle(fanSpeed)
-		print "Fan Speed: %d" % fanSpeed
-		if args.demo:
-			sleep(1)
+def create_plot():
+	global timestr
+	df = pd.read_csv(timestr+'.csv')
+	trace1 = go.Scattergl(x = df['date'], y = df['pit_temp'], name='Pit Temp (F)')
+	trace2 = go.Scattergl(x = df['date'], y = df['meat_temp'], name='Meat Temp (F)')
+	trace3 = go.Scattergl(x = df['date'], y = df['fanSpeed'], name='Fan Speed %')
+	layout = go.Layout(title='Baer BBQ - ' + timestr, plot_bgcolor='rgb(230, 230,230)', showlegend=True)
+	fig = go.Figure(data=[trace1,trace2,trace3], layout=layout)
+	try:
+		py.plot(fig, filename='Baer BBQ - ' + timestr)
+	except:
+		print "Unable to create plot..."
 
+def loop():
+	global P,I,D,B,pit_temp,meat_temp,current_temp,target_temp,count,fanSpeed,accumulatedError,sum,meat_temp,tempRangeMet,alertLastSent,f,timestr
+	f = open(timestr+'.csv', 'w')
+	f.write('date' + ',' + 'pit_temp' + ',' + 'meat_temp' + ',' + 'fanSpeed' + '\n')
+	f.close()
+	with open(timestr+'.csv', 'a') as csv_file:
+		while True:
+			now = datetime.datetime.now()
+			date = now.strftime(fmt)
+			pit_temp = str(get_temp(c.pit))
+			meat_temp = str(get_temp(c.meat))
+			print ("Current Pit Temperature: " + pit_temp)
+			print ("Current Meat Temperature: " + meat_temp)
+			print
+			current_temp = int(get_temp(c.pit))
+			print "Alert Last Sent : " + alertLastSent.strftime(fmt)
+			if int(current_temp) > int(c.alert_min_temp) and int(current_temp) < int(c.alert_max_temp):
+				# set alerting to true now
+				tempRangeMet = True
+			diff_sec = (now-alertLastSent).total_seconds()
+			if int(current_temp) < int(c.alert_min_temp) and tempRangeMet and int(diff_sec) > int(c.alert_max_interval_sec):
+				print "Temperature is too low... sending an alert!"
+				send_push("Temperature is too low... " + str(current_temp) + " at " + date, "BBQ - Low - " + str(current_temp))
+				alertLastSent = now
+			if int(current_temp) > int(c.alert_max_temp) and tempRangeMet and int(diff_sec) > int(c.alert_max_interval_sec): 
+				print "Temperature is too hot... sending an alert!"
+				send_push("Temperature is too HOT... " + str(current_temp) + " at " + date, "BBQ - HOT - " + str(current_temp))
+				alertLastSent = now
+			target_temp = int(c.set_temp)
+			error = (target_temp) - (current_temp)
+			log_verbose("Error: " + str(error))
+			if 0 < fanSpeed and fanSpeed < 100:
+				accumulatedError = accumulatedError + error
+				log_verbose("accumulatedError: " + str(accumulatedError))
+			sum = sum + current_temp
+			count += 1	
+			averageTemp = sum / count
+			log_verbose("Average Temp: %d" % averageTemp)
+			fanSpeed = B + ( P * error ) + ( I * accumulatedError ) + ( D * (averageTemp - current_temp)) 
+			if fanSpeed <= 0:
+				plotFanSpeed = 0
+				p.ChangeDutyCycle(0)
+			elif fanSpeed >= 100: 
+				plotFanSpeed = 100
+				p.ChangeDutyCycle(100)
+			else:
+				plotFanSpeed = fanSpeed
+				p.ChangeDutyCycle(fanSpeed)
+			print "Fan Speed: %d" % fanSpeed
+			csv_file.write(date + ',' + pit_temp + ',' + meat_temp + ',' + str(plotFanSpeed) + '\n')
+			csv_file.flush()
+			create_plot()
+			if args.demo:
+				sleep(1)
 def main():
 	setup_args()
 	read_config()
-	setup_stream()
 	setup_motor()
-
+	
 	print ("Pit Temperature Sensor: " + str(c.pit))
 	print ("Meat Temperature Sensor: " + str(c.meat))
 	log_verbose("Starting Program...")
