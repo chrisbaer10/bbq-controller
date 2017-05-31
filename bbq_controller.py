@@ -11,6 +11,7 @@ from pushover import Client
 import plotly.plotly as py
 import plotly.graph_objs as go
 import pandas as pd
+import plotly.exceptions as pe
 
 args={}
 counter=0
@@ -33,7 +34,9 @@ sum = 0
 tempRangeMet = False
 fmt = '%Y-%m-%d %H:%M:%S.%f'
 alertLastSent = datetime.datetime.now()
+plotLastSent = datetime.datetime.now()
 timestr = time.strftime("%Y%m%d-%H%M%S")
+plotted = False
 
 def send_push(message, title):
 	Client().send_message(message, title=title)
@@ -55,9 +58,9 @@ def log_verbose( string ):
 def read_config():
 	config = ConfigParser.RawConfigParser()
 	config.read('bbq_controller.cfg')
-	con = collections.namedtuple('config', ['pit', 'meat', 'set_temp', 'alert_min_temp', 'alert_max_temp', 'alert_max_interval_sec'])
+	con = collections.namedtuple('config', ['pit', 'meat', 'set_temp', 'alert_min_temp', 'alert_max_temp', 'alert_max_interval_sec', 'plot_max_interval_sec'])
 	global c
-	c = con(config.get('Sensors', 'pit_sensorid'), config.get('Sensors', 'meat_sensorid'), config.get('Configuration', 'set_temp'), config.get('Configuration', 'alert_min_temp'), config.get('Configuration', 'alert_max_temp'), config.get('Configuration', 'alert_max_interval_sec'))
+	c = con(config.get('Sensors', 'pit_sensorid'), config.get('Sensors', 'meat_sensorid'), config.get('Configuration', 'set_temp'), config.get('Configuration', 'alert_min_temp'), config.get('Configuration', 'alert_max_temp'), config.get('Configuration', 'alert_max_interval_sec'), config.get('Configuration', 'plot_max_interval_sec'))
 
 def getos(name):
 	return os.getenv(name)
@@ -89,7 +92,8 @@ def setup_motor():
 	p.start(0)
 
 def create_plot():
-	global timestr
+	global timestr,plotLastSent,plotted
+	print "Creating plot from " + timestr + ".csv"
 	df = pd.read_csv(timestr+'.csv')
 	trace1 = go.Scattergl(x = df['date'], y = df['pit_temp'], name='Pit Temp (F)')
 	trace2 = go.Scattergl(x = df['date'], y = df['meat_temp'], name='Meat Temp (F)')
@@ -98,11 +102,13 @@ def create_plot():
 	fig = go.Figure(data=[trace1,trace2,trace3], layout=layout)
 	try:
 		py.plot(fig, filename='Baer BBQ - ' + timestr)
-	except:
-		print "Unable to create plot..."
+		plotLastSent = now
+		plotted = True
+	except pe.PlotlyRequestError as detail:
+		print "Unable to create plot...", detail
 
 def loop():
-	global P,I,D,B,pit_temp,meat_temp,current_temp,target_temp,count,fanSpeed,accumulatedError,sum,meat_temp,tempRangeMet,alertLastSent,f,timestr
+	global P,I,D,B,pit_temp,meat_temp,current_temp,target_temp,count,fanSpeed,accumulatedError,sum,meat_temp,tempRangeMet,alertLastSent,f,timestr,plotLastSent, plotted
 	f = open(timestr+'.csv', 'w')
 	f.write('date' + ',' + 'pit_temp' + ',' + 'meat_temp' + ',' + 'fanSpeed' + '\n')
 	f.close()
@@ -117,15 +123,16 @@ def loop():
 			print
 			current_temp = int(get_temp(c.pit))
 			print "Alert Last Sent : " + alertLastSent.strftime(fmt)
+			print "Plot Last Sent : " + plotLastSent.strftime(fmt)
 			if int(current_temp) > int(c.alert_min_temp) and int(current_temp) < int(c.alert_max_temp):
 				# set alerting to true now
 				tempRangeMet = True
-			diff_sec = (now-alertLastSent).total_seconds()
-			if int(current_temp) < int(c.alert_min_temp) and tempRangeMet and int(diff_sec) > int(c.alert_max_interval_sec):
+			alert_diff_sec = (now-alertLastSent).total_seconds()
+			if int(current_temp) < int(c.alert_min_temp) and tempRangeMet and int(alert_diff_sec) > int(c.alert_max_interval_sec):
 				print "Temperature is too low... sending an alert!"
 				send_push("Temperature is too low... " + str(current_temp) + " at " + date, "BBQ - Low - " + str(current_temp))
 				alertLastSent = now
-			if int(current_temp) > int(c.alert_max_temp) and tempRangeMet and int(diff_sec) > int(c.alert_max_interval_sec): 
+			if int(current_temp) > int(c.alert_max_temp) and tempRangeMet and int(alert_diff_sec) > int(c.alert_max_interval_sec): 
 				print "Temperature is too hot... sending an alert!"
 				send_push("Temperature is too HOT... " + str(current_temp) + " at " + date, "BBQ - HOT - " + str(current_temp))
 				alertLastSent = now
@@ -152,7 +159,9 @@ def loop():
 			print "Fan Speed: %d" % fanSpeed
 			csv_file.write(date + ',' + pit_temp + ',' + meat_temp + ',' + str(plotFanSpeed) + '\n')
 			csv_file.flush()
-			create_plot()
+			plot_diff_sec = (now-plotLastSent).total_seconds()
+			if int(plot_diff_sec) > int(c.plot_max_interval_sec) or not plotted:
+				create_plot()
 			if args.demo:
 				sleep(1)
 def main():
