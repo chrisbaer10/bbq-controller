@@ -92,7 +92,7 @@ def setup_motor():
 	p.start(0)
 
 def create_plot():
-	global timestr,plotLastSent,plotted
+	global timestr,plotLastSent,plotted,now
 	print "Creating plot from " + timestr + ".csv"
 	df = pd.read_csv(timestr+'.csv')
 	trace1 = go.Scattergl(x = df['date'], y = df['pit_temp'], name='Pit Temp (F)')
@@ -108,7 +108,7 @@ def create_plot():
 		print "Unable to create plot...", detail
 
 def loop():
-	global P,I,D,B,pit_temp,meat_temp,current_temp,target_temp,count,fanSpeed,accumulatedError,sum,meat_temp,tempRangeMet,alertLastSent,f,timestr,plotLastSent, plotted
+	global P,I,D,B,pit_temp,meat_temp,current_temp,target_temp,count,fanSpeed,accumulatedError,sum,meat_temp,tempRangeMet,alertLastSent,f,timestr,plotLastSent,plotted,now
 	f = open(timestr+'.csv', 'w')
 	f.write('date' + ',' + 'pit_temp' + ',' + 'meat_temp' + ',' + 'fanSpeed' + '\n')
 	f.close()
