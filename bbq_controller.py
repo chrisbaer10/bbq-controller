@@ -104,7 +104,8 @@ def create_plot():
 	layout = go.Layout(title='Baer BBQ - ' + timestr, plot_bgcolor='rgb(230, 230,230)', showlegend=True)
 	fig = go.Figure(data=[trace1,trace2,trace3,trace4], layout=layout)
 	try:
-		py.plot(fig, filename='Baer BBQ - ' + timestr)
+		url = py.plot(fig, filename='Baer BBQ - ' + timestr)
+		send_push("Plotly URL: " + url, "Started Plotly")
 		plotLastSent = now
 		plotted = True
 	except pe.PlotlyRequestError as detail:
