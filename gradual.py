@@ -5,14 +5,11 @@ import RPi.GPIO as GPIO
 GPIO.setmode(GPIO.BOARD)
 Motor1A = 16
 Motor1B = 18
-Motor1E = 15
 
 GPIO.setup(Motor1A,GPIO.OUT)
 GPIO.setup(Motor1B,GPIO.OUT)
-GPIO.setup(Motor1E,GPIO.OUT)
 
 GPIO.output(Motor1B,GPIO.LOW)
-GPIO.output(Motor1E,GPIO.HIGH)
 
 p = GPIO.PWM(Motor1A, 50)  # channel=12 frequency=50Hz
 p.start(0)
