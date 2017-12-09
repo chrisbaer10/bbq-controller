@@ -17,14 +17,14 @@ args={}
 counter=0
 Motor1A = 16
 Motor1B = 18
+Motor1E = 22
 P = 5
 I = .1
 D = 10
 B = 0
 c={}
 pit_temp = 0
-meat1_temp = 0
-meat2_temp = 0
+meat_temp = 0
 target_temp = 0
 current_temp = 0
 count = 0
@@ -58,9 +58,9 @@ def log_verbose( string ):
 def read_config():
 	config = ConfigParser.RawConfigParser()
 	config.read('bbq_controller.cfg')
-	con = collections.namedtuple('config', ['pit', 'meat1', 'meat2', 'set_temp', 'alert_min_temp', 'alert_max_temp', 'alert_max_interval_sec', 'plot_max_interval_sec'])
+	con = collections.namedtuple('config', ['pit', 'meat', 'set_temp', 'alert_min_temp', 'alert_max_temp', 'alert_max_interval_sec', 'plot_max_interval_sec'])
 	global c
-	c = con(config.get('Sensors', 'pit_sensorid'), config.get('Sensors', 'meat1_sensorid'), config.get('Sensors', 'meat2_sensorid'), config.get('Configuration', 'set_temp'), config.get('Configuration', 'alert_min_temp'), config.get('Configuration', 'alert_max_temp'), config.get('Configuration', 'alert_max_interval_sec'), config.get('Configuration', 'plot_max_interval_sec'))
+	c = con(config.get('Sensors', 'pit_sensorid'), config.get('Sensors', 'meat_sensorid'), config.get('Configuration', 'set_temp'), config.get('Configuration', 'alert_min_temp'), config.get('Configuration', 'alert_max_temp'), config.get('Configuration', 'alert_max_interval_sec'), config.get('Configuration', 'plot_max_interval_sec'))
 
 def getos(name):
 	return os.getenv(name)
@@ -78,11 +78,14 @@ def setup_motor():
 	GPIO.setmode(GPIO.BOARD)
 	global Motor1A
 	global Motor1B
+	global Motor1E
 
 	GPIO.setup(Motor1A,GPIO.OUT)
 	GPIO.setup(Motor1B,GPIO.OUT)
+	GPIO.setup(Motor1E,GPIO.OUT)
 
 	GPIO.output(Motor1B,GPIO.LOW)
+	GPIO.output(Motor1E,GPIO.HIGH)
 
 	global p
 	p = GPIO.PWM(Motor1A, 50)
@@ -91,37 +94,32 @@ def setup_motor():
 def create_plot():
 	global timestr,plotLastSent,plotted,now
 	print "Creating plot from " + timestr + ".csv"
-	# TODO replace pandas with something else... takes a long time to download 
 	df = pd.read_csv(timestr+'.csv')
 	trace1 = go.Scattergl(x = df['date'], y = df['pit_temp'], name='Pit Temp (F)')
-	trace2 = go.Scattergl(x = df['date'], y = df['meat1_temp'], name='Meat Temp (F)')
-	trace3 = go.Scattergl(x = df['date'], y = df['meat2_temp'], name='Meat Temp (F)')
-	trace4 = go.Scattergl(x = df['date'], y = df['fanSpeed'], name='Fan Speed %')
+	trace2 = go.Scattergl(x = df['date'], y = df['meat_temp'], name='Meat Temp (F)')
+	trace3 = go.Scattergl(x = df['date'], y = df['fanSpeed'], name='Fan Speed %')
 	layout = go.Layout(title='Baer BBQ - ' + timestr, plot_bgcolor='rgb(230, 230,230)', showlegend=True)
-	fig = go.Figure(data=[trace1,trace2,trace3,trace4], layout=layout)
+	fig = go.Figure(data=[trace1,trace2,trace3], layout=layout)
 	try:
-		url = py.plot(fig, filename='Baer BBQ - ' + timestr)
-		send_push("Plotly URL: " + url, "Started Plotly")
+		py.plot(fig, filename='Baer BBQ - ' + timestr)
 		plotLastSent = now
 		plotted = True
 	except pe.PlotlyRequestError as detail:
 		print "Unable to create plot...", detail
 
 def loop():
-	global P,I,D,B,pit_temp,meat1_temp,meat2_temp,current_temp,target_temp,count,fanSpeed,accumulatedError,sum,tempRangeMet,alertLastSent,f,timestr,plotLastSent,plotted,now
+	global P,I,D,B,pit_temp,meat_temp,current_temp,target_temp,count,fanSpeed,accumulatedError,sum,meat_temp,tempRangeMet,alertLastSent,f,timestr,plotLastSent,plotted,now
 	f = open(timestr+'.csv', 'w')
-	f.write('date' + ',' + 'pit_temp' + ',' + 'meat1_temp' + ',' + 'meat2_temp' + ',' + 'fanSpeed' + '\n')
+	f.write('date' + ',' + 'pit_temp' + ',' + 'meat_temp' + ',' + 'fanSpeed' + '\n')
 	f.close()
 	with open(timestr+'.csv', 'a') as csv_file:
 		while True:
 			now = datetime.datetime.now()
 			date = now.strftime(fmt)
 			pit_temp = str(get_temp(c.pit))
-			meat1_temp = str(get_temp(c.meat1))
-			meat2_temp = str(get_temp(c.meat2))
+			meat_temp = str(get_temp(c.meat))
 			print ("Current Pit Temperature: " + pit_temp)
-			print ("Current Meat1 Temperature: " + meat1_temp)
-			print ("Current Meat2 Temperature: " + meat2_temp)
+			print ("Current Meat Temperature: " + meat_temp)
 			print
 			current_temp = int(get_temp(c.pit))
 			print "Alert Last Sent : " + alertLastSent.strftime(fmt)
@@ -159,7 +157,7 @@ def loop():
 				plotFanSpeed = fanSpeed
 				p.ChangeDutyCycle(fanSpeed)
 			print "Fan Speed: %d" % fanSpeed
-			csv_file.write(date + ',' + pit_temp + ',' + meat1_temp + ',' + meat2_temp + ',' + str(plotFanSpeed) + '\n')
+			csv_file.write(date + ',' + pit_temp + ',' + meat_temp + ',' + str(plotFanSpeed) + '\n')
 			csv_file.flush()
 			plot_diff_sec = (now-plotLastSent).total_seconds()
 			if int(plot_diff_sec) > int(c.plot_max_interval_sec) or not plotted:
@@ -172,8 +170,7 @@ def main():
 	setup_motor()
 	
 	print ("Pit Temperature Sensor: " + str(c.pit))
-	print ("Meat1 Temperature Sensor: " + str(c.meat1))
-	print ("Meat2 Temperature Sensor: " + str(c.meat2))
+	print ("Meat Temperature Sensor: " + str(c.meat))
 	log_verbose("Starting Program...")
 	print ("Set Temperature: " + str(c.set_temp))
 	print ("Alert Min Temperature: " + str(c.alert_min_temp))
